@@ -90,3 +90,12 @@ async def tradingview_webhook(request: Request):
         "status": "success" if sent else "telegram_failed",
         "received_keys": list(data.keys())
     }
+
+
+@app.get("/")
+def health_check():
+    return {
+        "status": "ok",
+        "service": "tradingview-webhook",
+        "time": datetime.now().isoformat()
+    }
