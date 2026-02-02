@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from datetime import datetime, date
 from dotenv import load_dotenv
 import os
@@ -6,7 +8,9 @@ import requests
 import json
 import time
 
-# Load env variables
+# =========================
+# 🔧 Environment
+# =========================
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -15,19 +19,26 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 app = FastAPI()
 
 # =========================
+# 🧩 Templates
+# =========================
+templates = Jinja2Templates(directory="templates")
+
+# =========================
 # 🔁 Trade tracking memory
 # =========================
 trade_tracker = {}
 current_day = date.today()
 
 
+# =========================
+# 📤 Telegram Sender (SAFE)
+# =========================
 def send_telegram_message(message: str, reply_to: int | None = None, retries: int = 3):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("❌ Telegram credentials missing")
         return None
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
@@ -41,82 +52,102 @@ def send_telegram_message(message: str, reply_to: int | None = None, retries: in
         try:
             response = requests.post(url, json=payload, timeout=5)
             if response.status_code == 200:
-                msg_id = response.json()["result"]["message_id"]
-                print("✅ Telegram message sent:", msg_id)
-                return msg_id
-            else:
-                print(f"⚠️ Telegram failed (attempt {attempt}): {response.text}")
+                return response.json()["result"]["message_id"]
         except Exception as e:
-            print(f"⚠️ Telegram exception (attempt {attempt}): {e}")
-
+            print(f"⚠️ Telegram error attempt {attempt}: {e}")
         time.sleep(1)
 
-    print("❌ Telegram message failed after retries")
     return None
 
 
+# =========================
+# 📩 TradingView Webhook
+# =========================
 @app.post("/webhook")
 async def tradingview_webhook(request: Request):
     global trade_tracker, current_day
 
+    # ---- JSON safety ----
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    if not isinstance(data, dict) or not data:
-        raise HTTPException(status_code=400, detail="Empty or invalid webhook data")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Payload must be JSON object")
 
-    # 🔁 Reset daily state
+    # ---- Daily reset ----
     today = date.today()
     if today != current_day:
-        trade_tracker = {}
+        trade_tracker.clear()
         current_day = today
 
+    # ---- Extract with fallback ----
     signal = str(data.get("signal", "")).upper()
-    asset = data.get("asset", "N/A")
+    ticker = data.get("ticker") or data.get("asset") or "UNKNOWN"
+    asset = data.get("asset", ticker)
     price = data.get("price", "N/A")
-    ticker = data.get("ticker", asset)
+    alert_time = data.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 🔑 Per-asset trade tracking
+    if signal not in {"BUY", "SELL"}:
+        raise HTTPException(status_code=400, detail="Invalid signal")
+
+    # ---- Init per ticker ----
     if ticker not in trade_tracker:
         trade_tracker[ticker] = {
             "serial": 0,
             "open_trade": False,
-            "buy_message_id": None
+            "buy_message_id": None,
+            "trades": []   # ✅ Trade book
         }
 
     trade = trade_tracker[ticker]
 
-    # 🧠 Serial logic
+    # =========================
+    # 🧠 Trade pairing logic
+    # =========================
     if signal == "BUY":
         trade["serial"] += 1
         trade["open_trade"] = True
 
+        trade["trades"].append({
+            "serial": trade["serial"],
+            "buy_time": alert_time,
+            "buy_price": price,
+            "sell_time": None,
+            "sell_price": None
+        })
+
     elif signal == "SELL":
-        if not trade["open_trade"]:
+        # Close last open trade if exists
+        if trade["trades"] and trade["trades"][-1]["sell_time"] is None:
+            trade["trades"][-1]["sell_time"] = alert_time
+            trade["trades"][-1]["sell_price"] = price
+        else:
+            # Fallback: orphan SELL → create standalone row
             trade["serial"] += 1
+            trade["trades"].append({
+                "serial": trade["serial"],
+                "buy_time": None,
+                "buy_price": None,
+                "sell_time": alert_time,
+                "sell_price": price
+            })
+
         trade["open_trade"] = False
 
     serial = trade["serial"]
 
-    # ⏰ Time formatting
+    # =========================
+    # 📩 Telegram Message
+    # =========================
+    icon = "🟢" if signal == "BUY" else "🔴"
+
     now = datetime.now()
-    time_str = now.strftime("%H:%M:%S")
-    date_str = now.strftime("%Y-%m-%d")
-
-    # 🎨 Signal style
-    if signal == "BUY":
-        icon = "🟢"
-    elif signal == "SELL":
-        icon = "🔴"
-    else:
-        icon = "⚪"
-
     message = f"""
 📩 <b>TradingView Alert</b>
 
-⏰ <b>{time_str}</b> | 📅 <b>{date_str}</b>
+⏰ <b>{now.strftime("%H:%M:%S")}</b> | 📅 <b>{now.strftime("%Y-%m-%d")}</b>
 
 {icon} <b>{serial}) {signal} signal</b>
 <b>Asset :</b> {asset}
@@ -124,33 +155,62 @@ async def tradingview_webhook(request: Request):
 <b>Ticker :</b> {ticker}
 """.strip()
 
-    # 🔗 Reply SELL to BUY
     reply_to_id = None
-    if signal == "SELL" and trade.get("buy_message_id"):
-        reply_to_id = trade["buy_message_id"]
+    if signal == "SELL":
+        reply_to_id = trade.get("buy_message_id")
 
-    # 📤 Send message
     msg_id = send_telegram_message(message, reply_to=reply_to_id)
 
-    # 🧠 Store BUY message id
     if signal == "BUY" and msg_id:
         trade["buy_message_id"] = msg_id
 
-    print("====== ALERT RECEIVED ======")
-    print(json.dumps(data, indent=2))
-
     return {
         "status": "success" if msg_id else "telegram_failed",
-        "serial": serial,
         "signal": signal,
-        "ticker": ticker
+        "ticker": ticker,
+        "serial": serial
     }
 
 
+# =========================
+# 📊 Dashboard (SAFE + FALLBACK)
+# =========================
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    rows = []
+
+    try:
+        for ticker, trade in trade_tracker.items():
+            for t in trade.get("trades", []):
+                rows.append({
+                    "ticker": ticker,
+                    "serial": t.get("serial", "-"),
+                    "buy_time": t.get("buy_time"),
+                    "buy_price": t.get("buy_price"),
+                    "sell_time": t.get("sell_time"),
+                    "sell_price": t.get("sell_price"),
+                })
+    except Exception as e:
+        print("Dashboard error:", e)
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "rows": rows,
+            "last_updated": datetime.now().strftime("%H:%M:%S")
+        }
+    )
+
+
+# =========================
+# ❤️ Health Check
+# =========================
 @app.get("/")
 def health_check():
     return {
         "status": "ok",
         "service": "tradingview-webhook",
+        "active_tickers": len(trade_tracker),
         "time": datetime.now().isoformat()
     }

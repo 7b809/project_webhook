@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>TradePulse Trade Dashboard</title>
+
+    <!-- Auto refresh -->
+    <meta http-equiv="refresh" content="5">
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        /* Page background */
+        body {
+            background: linear-gradient(135deg, #e3f2fd, #ffffff);
+            font-family: "Segoe UI", system-ui, sans-serif;
+        }
+
+        /* Header card */
+        .header-box {
+            background: linear-gradient(135deg, #0d6efd, #4dabf7);
+            color: white;
+            padding: 14px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(13,110,253,0.25);
+        }
+
+        /* Table container */
+        .table-container {
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 10px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        }
+
+        /* Table header */
+        table thead th {
+            background: linear-gradient(135deg, #0d6efd, #3f8cff);
+            color: #ffffff;
+            border: none;
+            font-weight: 600;
+        }
+
+        /* Table rows */
+        table tbody tr {
+            transition: background 0.2s ease;
+        }
+
+        table tbody tr:hover {
+            background-color: #f1f7ff;
+        }
+
+        /* Buy / Sell badges */
+        .buy-badge {
+            background: linear-gradient(135deg, #2e7d32, #66bb6a);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .sell-badge {
+            background: linear-gradient(135deg, #c62828, #ef5350);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        /* Empty placeholder */
+        .empty-text {
+            color: #90a4ae;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container mt-4">
+
+    <!-- Header -->
+    <div class="header-box d-flex justify-content-between align-items-center mb-4">
+        <h4 class="mb-0">📊 TradePulse Trade Book</h4>
+        <span>Last updated: {{ last_updated }}</span>
+    </div>
+
+    <!-- Table -->
+    <div class="table-container">
+        <div class="table-responsive">
+            <table class="table align-middle text-center mb-0">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Trade #</th>
+                        <th>BUY Time</th>
+                        <th>BUY Price</th>
+                        <th>SELL Time</th>
+                        <th>SELL Price</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                {% for row in rows %}
+                    <tr>
+
+                        <td><strong>{{ row.ticker }}</strong></td>
+
+                        <td>{{ row.serial }}</td>
+
+                        <!-- BUY TIME -->
+                        <td>
+                            {% if row.buy_time %}
+                                <span class="buy-badge">
+                                    🟢 {{ row.buy_time }}
+                                </span>
+                            {% else %}
+                                <span class="empty-text">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- BUY PRICE -->
+                        <td>
+                            {% if row.buy_price %}
+                                <span class="buy-badge">
+                                    🟢 {{ row.buy_price }}
+                                </span>
+                            {% else %}
+                                <span class="empty-text">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- SELL TIME -->
+                        <td>
+                            {% if row.sell_time %}
+                                <span class="sell-badge">
+                                    🔴 {{ row.sell_time }}
+                                </span>
+                            {% else %}
+                                <span class="empty-text">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- SELL PRICE -->
+                        <td>
+                            {% if row.sell_price %}
+                                <span class="sell-badge">
+                                    🔴 {{ row.sell_price }}
+                                </span>
+                            {% else %}
+                                <span class="empty-text">—</span>
+                            {% endif %}
+                        </td>
+
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    {% if rows|length == 0 %}
+        <div class="alert alert-info text-center mt-3">
+            No trades received yet.
+        </div>
+    {% endif %}
+
+</div>
+
+</body>
+</html>
