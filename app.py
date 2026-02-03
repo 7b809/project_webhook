@@ -29,7 +29,6 @@ templates = Jinja2Templates(directory="templates")
 trade_tracker = {}
 current_day = date.today()
 
-
 # =========================
 # 📤 Telegram Sender (SAFE)
 # =========================
@@ -59,7 +58,6 @@ def send_telegram_message(message: str, reply_to: int | None = None, retries: in
 
     return None
 
-
 # =========================
 # 📩 TradingView Webhook
 # =========================
@@ -86,7 +84,11 @@ async def tradingview_webhook(request: Request):
     signal = str(data.get("signal", "")).upper()
     ticker = data.get("ticker") or data.get("asset") or "UNKNOWN"
     asset = data.get("asset", ticker)
-    price = data.get("price", "N/A")
+
+    ltp = data.get("ltp", "N/A")
+    candle_low = data.get("candle_low")
+    candle_high = data.get("candle_high")
+
     alert_time = data.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if signal not in {"BUY", "SELL"}:
@@ -98,7 +100,7 @@ async def tradingview_webhook(request: Request):
             "serial": 0,
             "open_trade": False,
             "buy_message_id": None,
-            "trades": []   # ✅ Trade book
+            "trades": []
         }
 
     trade = trade_tracker[ticker]
@@ -113,25 +115,23 @@ async def tradingview_webhook(request: Request):
         trade["trades"].append({
             "serial": trade["serial"],
             "buy_time": alert_time,
-            "buy_price": price,
+            "buy_price": candle_low,   # ✅ BUY @ Candle LOW
             "sell_time": None,
             "sell_price": None
         })
 
     elif signal == "SELL":
-        # Close last open trade if exists
         if trade["trades"] and trade["trades"][-1]["sell_time"] is None:
             trade["trades"][-1]["sell_time"] = alert_time
-            trade["trades"][-1]["sell_price"] = price
+            trade["trades"][-1]["sell_price"] = candle_high  # ✅ SELL @ Candle HIGH
         else:
-            # Fallback: orphan SELL → create standalone row
             trade["serial"] += 1
             trade["trades"].append({
                 "serial": trade["serial"],
                 "buy_time": None,
                 "buy_price": None,
                 "sell_time": alert_time,
-                "sell_price": price
+                "sell_price": candle_high
             })
 
         trade["open_trade"] = False
@@ -142,17 +142,21 @@ async def tradingview_webhook(request: Request):
     # 📩 Telegram Message
     # =========================
     icon = "🟢" if signal == "BUY" else "🔴"
+    price_label = "Candle Low" if signal == "BUY" else "Candle High"
+    price_value = candle_low if signal == "BUY" else candle_high
 
-    now = datetime.now()
     message = f"""
-📩 <b>TradingView Alert</b>
+📩 <b>TradePulse Alert</b>
 
-⏰ <b>{now.strftime("%H:%M:%S")}</b> | 📅 <b>{now.strftime("%Y-%m-%d")}</b>
+{icon} <b>{serial}) {signal}</b>
 
-{icon} <b>{serial}) {signal} signal</b>
-<b>Asset :</b> {asset}
-<b>Price :</b> {price}
-<b>Ticker :</b> {ticker}
+<b>Asset:</b> {asset}
+<b>Ticker:</b> {ticker}
+
+<b>LTP:</b> {ltp}
+<b>{price_label}:</b> {price_value}
+
+⏰ {alert_time}
 """.strip()
 
     reply_to_id = None
@@ -171,9 +175,8 @@ async def tradingview_webhook(request: Request):
         "serial": serial
     }
 
-
 # =========================
-# 📊 Dashboard (SAFE + FALLBACK)
+# 📊 Dashboard
 # =========================
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -201,7 +204,6 @@ async def dashboard(request: Request):
             "last_updated": datetime.now().strftime("%H:%M:%S")
         }
     )
-
 
 # =========================
 # ❤️ Health Check
