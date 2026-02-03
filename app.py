@@ -7,7 +7,7 @@ import os
 import requests
 import json
 import time
-
+from options_data import options_main
 # =========================
 # 🔧 Environment
 # =========================
@@ -204,6 +204,92 @@ async def dashboard(request: Request):
             "last_updated": datetime.now().strftime("%H:%M:%S")
         }
     )
+
+
+# =========================
+# 🧠 Options Intelligence Dashboard
+# =========================
+@app.get("/options", response_class=HTMLResponse)
+async def options_dashboard(request: Request):
+    try:
+        result = options_main()
+
+        # ---- Hard failure fallback ----
+        if not isinstance(result, dict):
+            return templates.TemplateResponse(
+                "options.html",
+                {
+                    "request": request,
+                    "rows": [],
+                    "error": "Invalid options data format",
+                    "last_updated": datetime.now().strftime("%H:%M:%S")
+                }
+            )
+
+        status = result.get("status")
+        options_data = result.get("data", {})
+
+        # ---- Error from scanner ----
+        if status == "error":
+            return templates.TemplateResponse(
+                "options.html",
+                {
+                    "request": request,
+                    "rows": [],
+                    "error": result.get("message", "Options scanner error"),
+                    "last_updated": datetime.now().strftime("%H:%M:%S")
+                }
+            )
+
+        # ---- Empty but valid ----
+        if status == "empty" or not options_data:
+            return templates.TemplateResponse(
+                "options.html",
+                {
+                    "request": request,
+                    "rows": [],
+                    "error": None,
+                    "last_updated": datetime.now().strftime("%H:%M:%S")
+                }
+            )
+
+        # ---- Build rows for UI ----
+        rows = []
+        for symbol, data in options_data.items():
+            conclusion = data.get("conclusion", {})
+
+            rows.append({
+                "symbol": symbol,
+                "ltp": data.get("ltp"),
+                "openInterest": data.get("openInterest"),
+                "rankScore": round(data.get("rankScore", 0), 2),
+                "bias": conclusion.get("bias", "NEUTRAL"),
+                "confidence": conclusion.get("confidence", "-"),
+                "reason": conclusion.get("reason", "-"),
+                "context": ", ".join(data.get("context", []))
+            })
+
+        return templates.TemplateResponse(
+            "options.html",
+            {
+                "request": request,
+                "rows": rows,
+                "error": None,
+                "last_updated": datetime.now().strftime("%H:%M:%S")
+            }
+        )
+
+    except Exception as e:
+        # ---- Absolute safety net ----
+        return templates.TemplateResponse(
+            "options.html",
+            {
+                "request": request,
+                "rows": [],
+                "error": f"Unexpected server error: {str(e)}",
+                "last_updated": datetime.now().strftime("%H:%M:%S")
+            }
+        )
 
 # =========================
 # ❤️ Health Check
