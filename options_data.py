@@ -35,7 +35,6 @@ def get_weekly_expiry():
             expiry += timedelta(days=7)
         return expiry
     except Exception:
-        # fallback: today (safe)
         return datetime.now()
 
 _expiry_dt = get_weekly_expiry()
@@ -90,6 +89,23 @@ def liquidity_score(data):
     except Exception:
         return 0
 
+# =========================
+# ✅ NEW: VOLUME SIGNAL (ADDED)
+# =========================
+def volume_signal(data):
+    vol = data.get("volume", 0)
+    oi = data.get("openInterest", 0)
+
+    if vol >= 50000 and oi >= 20000:
+        return "VERY_HIGH"
+    if vol >= 20000:
+        return "HIGH"
+    if vol >= 5000:
+        return "MEDIUM"
+    if vol > 0:
+        return "LOW"
+    return "UNAVAILABLE"
+
 # ---------- CONTEXT ----------
 def build_context(data, volume_available):
     reasons = []
@@ -118,6 +134,11 @@ def build_context(data, volume_available):
         reasons.append("Low premium option, high gamma move potential")
     elif ltp > 150:
         reasons.append("High premium option, likely ATM/ITM and actively traded")
+
+    # ✅ ADD VOLUME SIGNAL TO CONTEXT (NON-BREAKING)
+    vs = volume_signal(data)
+    if vs != "UNAVAILABLE":
+        reasons.append(f"{vs.replace('_', ' ')} volume participation")
 
     return reasons
 
@@ -187,6 +208,9 @@ def options_main():
             "lastTradeQty": data.get("lastTradeQty", 0),
         }
 
+        # ✅ ADD VOLUME SIGNAL TO RESPONSE
+        entry["volumeSignal"] = volume_signal(data)
+
         entry["rankScore"] = (
             entry["volume"] if volume_available else liquidity_score(data)
         )
@@ -208,9 +232,6 @@ def options_main():
 # SAFE PUBLIC ENTRY POINT
 # =========================
 def run_scanner():
-    """
-    API / FastAPI / Cron safe wrapper
-    """
     try:
         data = options_main()
 
@@ -237,10 +258,3 @@ def run_scanner():
             "timestamp": datetime.now().isoformat(),
             "data": {}
         }
-
-# # =========================
-# # LOCAL TEST
-# # =========================
-# if __name__ == "__main__":
-#     result = run_scanner()
-#     print(json.dumps(result, indent=2))

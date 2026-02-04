@@ -206,43 +206,16 @@ async def dashboard(request: Request):
     )
 
 
+
 # =========================
 # 🧠 Options Intelligence Dashboard
 # =========================
 @app.get("/options", response_class=HTMLResponse)
 async def options_dashboard(request: Request):
     try:
-        result = options_main()
+        options_data = options_main()
 
-        # ---- Hard failure fallback ----
-        if not isinstance(result, dict):
-            return templates.TemplateResponse(
-                "options.html",
-                {
-                    "request": request,
-                    "rows": [],
-                    "error": "Invalid options data format",
-                    "last_updated": datetime.now().strftime("%H:%M:%S")
-                }
-            )
-
-        status = result.get("status")
-        options_data = result.get("data", {})
-
-        # ---- Error from scanner ----
-        if status == "error":
-            return templates.TemplateResponse(
-                "options.html",
-                {
-                    "request": request,
-                    "rows": [],
-                    "error": result.get("message", "Options scanner error"),
-                    "last_updated": datetime.now().strftime("%H:%M:%S")
-                }
-            )
-
-        # ---- Empty but valid ----
-        if status == "empty" or not options_data:
+        if not isinstance(options_data, dict) or not options_data:
             return templates.TemplateResponse(
                 "options.html",
                 {
@@ -253,7 +226,6 @@ async def options_dashboard(request: Request):
                 }
             )
 
-        # ---- Build rows for UI ----
         rows = []
         for symbol, data in options_data.items():
             conclusion = data.get("conclusion", {})
@@ -266,7 +238,10 @@ async def options_dashboard(request: Request):
                 "bias": conclusion.get("bias", "NEUTRAL"),
                 "confidence": conclusion.get("confidence", "-"),
                 "reason": conclusion.get("reason", "-"),
-                "context": ", ".join(data.get("context", []))
+                "context": ", ".join(data.get("context", [])),
+
+                # ✅ NEW (NON-BREAKING)
+                "volumeSignal": data.get("volumeSignal", "UNAVAILABLE")
             })
 
         return templates.TemplateResponse(
@@ -280,7 +255,6 @@ async def options_dashboard(request: Request):
         )
 
     except Exception as e:
-        # ---- Absolute safety net ----
         return templates.TemplateResponse(
             "options.html",
             {

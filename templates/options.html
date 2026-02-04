@@ -22,34 +22,19 @@
             margin-bottom: 20px;
         }
 
-        .buy {
-            background: #2e7d32;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 8px;
-            font-weight: 600;
-        }
+        th { cursor: pointer; user-select: none; }
 
-        .sell {
-            background: #c62828;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 8px;
-            font-weight: 600;
-        }
+        .buy { background:#2e7d32;color:white;padding:5px 10px;border-radius:8px;font-weight:600; }
+        .sell { background:#c62828;color:white;padding:5px 10px;border-radius:8px;font-weight:600; }
+        .neutral { background:#607d8b;color:white;padding:5px 10px;border-radius:8px;font-weight:600; }
 
-        .neutral {
-            background: #607d8b;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 8px;
-            font-weight: 600;
-        }
+        .confidence { font-size:0.85rem; opacity:0.85; }
 
-        .confidence {
-            font-size: 0.85rem;
-            opacity: 0.85;
-        }
+        /* 🔥 VOLUME BADGES */
+        .volume-very-high { background:#6a1b9a;color:white;padding:4px 8px;border-radius:6px;font-weight:600; }
+        .volume-high { background:#2e7d32;color:white;padding:4px 8px;border-radius:6px;font-weight:600; }
+        .volume-medium { background:#f9a825;color:black;padding:4px 8px;border-radius:6px;font-weight:600; }
+        .volume-low { background:#b0bec5;color:black;padding:4px 8px;border-radius:6px;font-weight:600; }
     </style>
 </head>
 
@@ -68,18 +53,56 @@
         </div>
     {% endif %}
 
+    <!-- 🔎 FILTERS -->
+    <div class="row g-2 mb-2">
+        <div class="col-md-2">
+            <select id="biasFilter" class="form-select">
+                <option value="">All Bias</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="NEUTRAL">NEUTRAL</option>
+            </select>
+        </div>
+
+        <div class="col-md-2">
+            <select id="confidenceFilter" class="form-select">
+                <option value="">All Confidence</option>
+                <option value="HIGH">HIGH</option>
+                <option value="MEDIUM">MEDIUM</option>
+                <option value="LOW">LOW</option>
+            </select>
+        </div>
+
+        <div class="col-md-2">
+            <select id="ltpOrder" class="form-select">
+                <option value="">LTP Order</option>
+                <option value="ASC">LTP Ascending</option>
+                <option value="DESC">LTP Descending</option>
+            </select>
+        </div>
+
+        <div class="col-md-2"><input type="number" id="rankMin" class="form-control" placeholder="Rank Min"></div>
+        <div class="col-md-2"><input type="number" id="rankMax" class="form-control" placeholder="Rank Max"></div>
+    </div>
+
+    <div class="mb-3 text-end">
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetAll()">🔄 Reset All Filters</button>
+    </div>
+
+    <!-- 📊 TABLE -->
     <div class="table-responsive mt-3">
         <table class="table table-bordered align-middle text-center">
             <thead class="table-dark">
                 <tr>
-                    <th>Symbol</th>
+                    <th onclick="sortTable(0)">Symbol ⬍</th>
                     <th>LTP</th>
-                    <th>OI</th>
-                    <th>Rank</th>
-                    <th>Bias</th>
-                    <th>Confidence</th>
-                    <th>Reason</th>
-                    <th>Context</th>
+                    <th onclick="sortTable(2)">OI ⬍</th>
+                    <th onclick="sortTable(3)">Rank ⬍</th>
+                    <th>Volume</th>
+                    <th onclick="sortTable(5)">Bias ⬍</th>
+                    <th onclick="sortConfidence()">Confidence ⬍</th>
+                    <th onclick="sortTable(7)">Reason ⬍</th>
+                    <th onclick="sortTable(8)">Context ⬍</th>
                 </tr>
             </thead>
 
@@ -90,6 +113,21 @@
                     <td>{{ row.ltp }}</td>
                     <td>{{ row.openInterest }}</td>
                     <td>{{ row.rankScore }}</td>
+
+                    <!-- 🔥 VOLUME SIGNAL -->
+                    <td>
+                        {% if row.volumeSignal == "VERY_HIGH" %}
+                            <span class="volume-very-high">VERY HIGH</span>
+                        {% elif row.volumeSignal == "HIGH" %}
+                            <span class="volume-high">HIGH</span>
+                        {% elif row.volumeSignal == "MEDIUM" %}
+                            <span class="volume-medium">MEDIUM</span>
+                        {% elif row.volumeSignal == "LOW" %}
+                            <span class="volume-low">LOW</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
 
                     <td>
                         {% if row.bias == "BUY" %}
@@ -109,13 +147,96 @@
             </tbody>
         </table>
     </div>
-
-    {% if rows|length == 0 and not error %}
-        <div class="alert alert-info text-center mt-3">
-            No options data available yet.
-        </div>
-    {% endif %}
 </div>
+
+<script>
+let sortDir = {};
+let lastSortCol = null;
+const confidenceRank = { HIGH:3, MEDIUM:2, LOW:1 };
+
+function saveState() {
+    localStorage.setItem("tradepulse_state", JSON.stringify({
+        bias: biasFilter.value,
+        confidence: confidenceFilter.value,
+        ltpOrder: ltpOrder.value,
+        rankMin: rankMin.value,
+        rankMax: rankMax.value,
+        sortDir,
+        lastSortCol
+    }));
+}
+
+function restoreState() {
+    const saved = localStorage.getItem("tradepulse_state");
+    if (!saved) return;
+    const s = JSON.parse(saved);
+
+    biasFilter.value = s.bias || "";
+    confidenceFilter.value = s.confidence || "";
+    ltpOrder.value = s.ltpOrder || "";
+    rankMin.value = s.rankMin || "";
+    rankMax.value = s.rankMax || "";
+    sortDir = s.sortDir || {};
+    lastSortCol = s.lastSortCol;
+}
+
+function sortConfidence() {
+    const tbody = document.querySelector("tbody");
+    const rows = [...tbody.rows];
+    lastSortCol = "confidence";
+
+    rows.sort((a,b)=>
+        confidenceRank[b.cells[6].innerText.trim()] -
+        confidenceRank[a.cells[6].innerText.trim()]
+    );
+
+    rows.forEach(r=>tbody.appendChild(r));
+    saveState();
+}
+
+function applyFilters() {
+    let rows = [...document.querySelectorAll("tbody tr")];
+
+    if (ltpOrder.value) {
+        rows.sort((a,b)=>{
+            let A = parseFloat(a.cells[1].innerText);
+            let B = parseFloat(b.cells[1].innerText);
+            return ltpOrder.value === "ASC" ? A - B : B - A;
+        });
+        rows.forEach(r=>r.parentNode.appendChild(r));
+    }
+
+    rows.forEach(row=>{
+        let show=true;
+        const bias=row.cells[5].innerText.trim();
+        const conf=row.cells[6].innerText.trim();
+        const rank=parseFloat(row.cells[3].innerText);
+
+        if(biasFilter.value && bias!==biasFilter.value) show=false;
+        if(confidenceFilter.value && conf!==confidenceFilter.value) show=false;
+        if(rankMin.value && rank<rankMin.value) show=false;
+        if(rankMax.value && rank>rankMax.value) show=false;
+
+        row.style.display=show?"":"none";
+    });
+
+    saveState();
+}
+
+document.querySelectorAll("select, input")
+    .forEach(el=>el.addEventListener("change",applyFilters));
+
+function resetAll() {
+    localStorage.removeItem("tradepulse_state");
+    location.reload();
+}
+
+window.onload=()=>{
+    restoreState();
+    sortConfidence();
+    applyFilters();
+};
+</script>
 
 </body>
 </html>
