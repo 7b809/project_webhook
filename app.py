@@ -213,6 +213,54 @@ async def tradingview_webhook(request: Request):
         "serial": serial
     }
 
+@app.post("/webhook/raw")
+async def raw_webhook(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Payload must be JSON object")
+
+    # ---- Best-effort mapping ----
+    ticker = data.get("ticker") or data.get("s") or "UNKNOWN"
+    signal = data.get("signal") or data.get("si") or "INFO"
+    price = data.get("ltp") or data.get("pr") or "-"
+    timeframe = data.get("tf", "-")
+    strategy = data.get("indicator") or data.get("st") or "UNKNOWN"
+    rsi = data.get("ri", "-")
+
+    alert_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ---- Build formatted message (RAW MODE) ----
+    message = f"""
+📩 <b>Raw Webhook Alert</b>
+
+<b>Signal:</b> {signal}
+<b>Ticker:</b> {ticker}
+
+<b>Price:</b> {price}
+<b>RSI:</b> {rsi}
+<b>Timeframe:</b> {timeframe}
+
+<b>Source / Strategy:</b> {strategy}
+
+<b>Full Payload:</b>
+<pre>{str(data)}</pre>
+
+⏰ {alert_time}
+""".strip()
+
+    msg_id = send_telegram_message(message)
+
+    return {
+        "status": "success" if msg_id else "telegram_failed",
+        "mode": "raw",
+        "ticker": ticker,
+        "signal": signal
+    }
+
 # =========================
 # 📊 Dashboard (UNCHANGED)
 # =========================
