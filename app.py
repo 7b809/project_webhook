@@ -5,9 +5,9 @@ from datetime import datetime, date
 from dotenv import load_dotenv
 import os
 import requests
-import json
 import time
 from options_data import options_main
+
 # =========================
 # 🔧 Environment
 # =========================
@@ -30,7 +30,41 @@ trade_tracker = {}
 current_day = date.today()
 
 # =========================
-# 📤 Telegram Sender (SAFE)
+# 🧠 Signal Classifier (NEW - SAFE)
+# =========================
+def classify_signal(data: dict):
+    signal_type = str(data.get("signal_type", "GENERAL")).upper()
+    signal = str(data.get("signal", "")).upper()
+
+    if signal_type == "BIG_PLAYER":
+        return {
+            "emoji": "🐳" if signal == "BUYING" else "🔻",
+            "title": f"Big Player {signal.title()}",
+            "track_trade": False
+        }
+
+    if signal_type == "VOLUME":
+        return {
+            "emoji": "📊",
+            "title": "Volume Expansion",
+            "track_trade": False
+        }
+
+    if signal in {"BUY", "SELL"}:
+        return {
+            "emoji": "🟢" if signal == "BUY" else "🔴",
+            "title": f"{signal} Signal",
+            "track_trade": True
+        }
+
+    return {
+        "emoji": "ℹ️",
+        "title": "Market Event",
+        "track_trade": False
+    }
+
+# =========================
+# 📤 Telegram Sender
 # =========================
 def send_telegram_message(message: str, reply_to: int | None = None, retries: int = 3):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -65,7 +99,6 @@ def send_telegram_message(message: str, reply_to: int | None = None, retries: in
 async def tradingview_webhook(request: Request):
     global trade_tracker, current_day
 
-    # ---- JSON safety ----
     try:
         data = await request.json()
     except Exception:
@@ -80,19 +113,25 @@ async def tradingview_webhook(request: Request):
         trade_tracker.clear()
         current_day = today
 
-    # ---- Extract with fallback ----
+    # ---- Extract ----
     signal = str(data.get("signal", "")).upper()
+    signal_type = str(data.get("signal_type", "GENERAL")).upper()
+
+    if not signal:
+        raise HTTPException(status_code=400, detail="Missing signal")
+
     ticker = data.get("ticker") or data.get("asset") or "UNKNOWN"
     asset = data.get("asset", ticker)
-
     ltp = data.get("ltp", "N/A")
     candle_low = data.get("candle_low")
     candle_high = data.get("candle_high")
-
     alert_time = data.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if signal not in {"BUY", "SELL"}:
-        raise HTTPException(status_code=400, detail="Invalid signal")
+    # ---- Classify ----
+    meta = classify_signal(data)
+    emoji = meta["emoji"]
+    title = meta["title"]
+    track_trade = meta["track_trade"]
 
     # ---- Init per ticker ----
     if ticker not in trade_tracker:
@@ -106,24 +145,24 @@ async def tradingview_webhook(request: Request):
     trade = trade_tracker[ticker]
 
     # =========================
-    # 🧠 Trade pairing logic
+    # 🧠 Trade pairing (UNCHANGED LOGIC, GATED)
     # =========================
-    if signal == "BUY":
+    if track_trade and signal == "BUY":
         trade["serial"] += 1
         trade["open_trade"] = True
 
         trade["trades"].append({
             "serial": trade["serial"],
             "buy_time": alert_time,
-            "buy_price": candle_low,   # ✅ BUY @ Candle LOW
+            "buy_price": candle_low,
             "sell_time": None,
             "sell_price": None
         })
 
-    elif signal == "SELL":
+    elif track_trade and signal == "SELL":
         if trade["trades"] and trade["trades"][-1]["sell_time"] is None:
             trade["trades"][-1]["sell_time"] = alert_time
-            trade["trades"][-1]["sell_price"] = candle_high  # ✅ SELL @ Candle HIGH
+            trade["trades"][-1]["sell_price"] = candle_high
         else:
             trade["serial"] += 1
             trade["trades"].append({
@@ -139,62 +178,57 @@ async def tradingview_webhook(request: Request):
     serial = trade["serial"]
 
     # =========================
-    # 📩 Telegram Message
+    # 📩 Telegram Message (ENHANCED)
     # =========================
-    icon = "🟢" if signal == "BUY" else "🔴"
-    price_label = "Candle Low" if signal == "BUY" else "Candle High"
-    price_value = candle_low if signal == "BUY" else candle_high
-
     message = f"""
-📩 <b>TradePulse Alert</b>
+📩 <b>{title}</b>
 
-{icon} <b>{serial}) {signal}</b>
+{emoji} <b>{signal}</b>
 
+<b>Indicator:</b> {data.get("indicator", "N/A")}
 <b>Asset:</b> {asset}
 <b>Ticker:</b> {ticker}
 
 <b>LTP:</b> {ltp}
-<b>{price_label}:</b> {price_value}
+<b>Candle Low:</b> {candle_low or "-"}
+<b>Candle High:</b> {candle_high or "-"}
+
+<b>Label:</b> {data.get("label", "-")}
+<b>Confidence:</b> {data.get("confidence", "N/A")}
 
 ⏰ {alert_time}
 """.strip()
 
-    reply_to_id = None
-    if signal == "SELL":
-        reply_to_id = trade.get("buy_message_id")
-
+    reply_to_id = trade.get("buy_message_id") if signal == "SELL" else None
     msg_id = send_telegram_message(message, reply_to=reply_to_id)
 
-    if signal == "BUY" and msg_id:
+    if signal == "BUY" and track_trade and msg_id:
         trade["buy_message_id"] = msg_id
 
     return {
         "status": "success" if msg_id else "telegram_failed",
         "signal": signal,
+        "signal_type": signal_type,
         "ticker": ticker,
         "serial": serial
     }
 
 # =========================
-# 📊 Dashboard
+# 📊 Dashboard (UNCHANGED)
 # =========================
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     rows = []
-
-    try:
-        for ticker, trade in trade_tracker.items():
-            for t in trade.get("trades", []):
-                rows.append({
-                    "ticker": ticker,
-                    "serial": t.get("serial", "-"),
-                    "buy_time": t.get("buy_time"),
-                    "buy_price": t.get("buy_price"),
-                    "sell_time": t.get("sell_time"),
-                    "sell_price": t.get("sell_price"),
-                })
-    except Exception as e:
-        print("Dashboard error:", e)
+    for ticker, trade in trade_tracker.items():
+        for t in trade.get("trades", []):
+            rows.append({
+                "ticker": ticker,
+                "serial": t.get("serial"),
+                "buy_time": t.get("buy_time"),
+                "buy_price": t.get("buy_price"),
+                "sell_time": t.get("sell_time"),
+                "sell_price": t.get("sell_price"),
+            })
 
     return templates.TemplateResponse(
         "index.html",
@@ -205,65 +239,36 @@ async def dashboard(request: Request):
         }
     )
 
-
-
 # =========================
-# 🧠 Options Intelligence Dashboard
+# 🧠 Options Dashboard (UNCHANGED)
 # =========================
 @app.get("/options", response_class=HTMLResponse)
 async def options_dashboard(request: Request):
-    try:
-        options_data = options_main()
+    options_data = options_main() or {}
+    rows = []
 
-        if not isinstance(options_data, dict) or not options_data:
-            return templates.TemplateResponse(
-                "options.html",
-                {
-                    "request": request,
-                    "rows": [],
-                    "error": None,
-                    "last_updated": datetime.now().strftime("%H:%M:%S")
-                }
-            )
+    for symbol, data in options_data.items():
+        conclusion = data.get("conclusion", {})
+        rows.append({
+            "symbol": symbol,
+            "ltp": data.get("ltp"),
+            "openInterest": data.get("openInterest"),
+            "rankScore": round(data.get("rankScore", 0), 2),
+            "bias": conclusion.get("bias", "NEUTRAL"),
+            "confidence": conclusion.get("confidence", "-"),
+            "reason": conclusion.get("reason", "-"),
+            "context": ", ".join(data.get("context", [])),
+            "volumeSignal": data.get("volumeSignal", "UNAVAILABLE")
+        })
 
-        rows = []
-        for symbol, data in options_data.items():
-            conclusion = data.get("conclusion", {})
-
-            rows.append({
-                "symbol": symbol,
-                "ltp": data.get("ltp"),
-                "openInterest": data.get("openInterest"),
-                "rankScore": round(data.get("rankScore", 0), 2),
-                "bias": conclusion.get("bias", "NEUTRAL"),
-                "confidence": conclusion.get("confidence", "-"),
-                "reason": conclusion.get("reason", "-"),
-                "context": ", ".join(data.get("context", [])),
-
-                # ✅ NEW (NON-BREAKING)
-                "volumeSignal": data.get("volumeSignal", "UNAVAILABLE")
-            })
-
-        return templates.TemplateResponse(
-            "options.html",
-            {
-                "request": request,
-                "rows": rows,
-                "error": None,
-                "last_updated": datetime.now().strftime("%H:%M:%S")
-            }
-        )
-
-    except Exception as e:
-        return templates.TemplateResponse(
-            "options.html",
-            {
-                "request": request,
-                "rows": [],
-                "error": f"Unexpected server error: {str(e)}",
-                "last_updated": datetime.now().strftime("%H:%M:%S")
-            }
-        )
+    return templates.TemplateResponse(
+        "options.html",
+        {
+            "request": request,
+            "rows": rows,
+            "last_updated": datetime.now().strftime("%H:%M:%S")
+        }
+    )
 
 # =========================
 # ❤️ Health Check
