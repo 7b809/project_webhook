@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Groww Option Downloader</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-dark text-light">
+
+<div class="container mt-5">
+    <h2 class="mb-4">Option Data Downloader</h2>
+
+    <form id="downloadForm">
+        <div class="row mb-3">
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Index (NIFTY)" name="index_name" required>
+            </div>
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Year (26)" name="year" required>
+            </div>
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Month (FEB)" name="month" required>
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Strike" name="strike" required>
+            </div>
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Option Type (CE/PE)" name="option_type" required>
+            </div>
+            <div class="col">
+                <input type="number" class="form-control" placeholder="Interval (1)" name="interval" value="1">
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <input type="text" class="form-control" placeholder="Start Date (DD-MM-YYYY)" name="start_date" required>
+            </div>
+            <div class="col">
+                <input type="text" class="form-control" placeholder="End Date (DD-MM-YYYY)" name="end_date" required>
+            </div>
+        </div>
+
+        <button class="btn btn-success w-100">Download JSON</button>
+    </form>
+</div>
+
+<script>
+document.getElementById("downloadForm").onsubmit = async function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(this);
+    const params = new URLSearchParams(formData);
+
+    const response = await fetch("/api/download?" + params.toString());
+    const data = await response.json();
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.symbol + ".json";
+    a.click();
+};
+</script>
+
+</body>
+</html>
